@@ -1,10 +1,12 @@
-package main
+package radix_test
 
 import (
 	"fmt"
 	"math/rand"
 	"reflect"
 	"testing"
+
+	radix "github.com/saeedsamimi/router-radix-tree"
 )
 
 // Test helper functions
@@ -14,7 +16,7 @@ func assertEqual(t *testing.T, actual, expected interface{}, message string) {
 	}
 }
 
-func assertParamsEqual(t *testing.T, actual, expected Params, message string) {
+func assertParamsEqual(t *testing.T, actual, expected radix.Params, message string) {
 	if len(actual) != len(expected) {
 		t.Errorf("%s: expected %d params, got %d", message, len(expected), len(actual))
 		return
@@ -30,7 +32,7 @@ func assertParamsEqual(t *testing.T, actual, expected Params, message string) {
 
 // TestBasicRouting tests basic static route matching
 func TestBasicRouting(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	// Add routes
 	tree.Add([]string{}, "root")
@@ -63,7 +65,7 @@ func TestBasicRouting(t *testing.T) {
 
 // TestParameterRouting tests dynamic parameter matching
 func TestParameterRouting(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	// Add routes with parameters
 	tree.Add([]string{"users", ":id"}, "user_show")
@@ -74,31 +76,31 @@ func TestParameterRouting(t *testing.T) {
 	tests := []struct {
 		path            []string
 		expectedHandler string
-		expectedParams  Params
+		expectedParams  radix.Params
 		found           bool
 	}{
 		{
 			[]string{"users", "123"},
 			"user_show",
-			Params{{Key: "id", Values: []string{"123"}}},
+			radix.Params{{Key: "id", Values: []string{"123"}}},
 			true,
 		},
 		{
 			[]string{"users", "456", "posts"},
 			"user_posts",
-			Params{{Key: "id", Values: []string{"456"}}},
+			radix.Params{{Key: "id", Values: []string{"456"}}},
 			true,
 		},
 		{
 			[]string{"users", "789", "posts", "101"},
 			"user_post_show",
-			Params{{Key: "id", Values: []string{"789"}}, {Key: "post_id", Values: []string{"101"}}},
+			radix.Params{{Key: "id", Values: []string{"789"}}, {Key: "post_id", Values: []string{"101"}}},
 			true,
 		},
 		{
 			[]string{"articles", "golang-tips", "comments", "5"},
 			"article_comment",
-			Params{{Key: "slug", Values: []string{"golang-tips"}}, {Key: "comment_id", Values: []string{"5"}}},
+			radix.Params{{Key: "slug", Values: []string{"golang-tips"}}, {Key: "comment_id", Values: []string{"5"}}},
 			true,
 		},
 		{
@@ -127,7 +129,7 @@ func TestParameterRouting(t *testing.T) {
 
 // TestWildcardRouting tests wildcard (*) parameter matching
 func TestWildcardRouting(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	// Add wildcard routes
 	tree.Add([]string{"files", "*filepath"}, "files")
@@ -137,31 +139,31 @@ func TestWildcardRouting(t *testing.T) {
 	tests := []struct {
 		path            []string
 		expectedHandler string
-		expectedParams  Params
+		expectedParams  radix.Params
 		found           bool
 	}{
 		{
 			[]string{"files", "documents", "readme.txt"},
 			"files",
-			Params{{Key: "filepath", Values: []string{"documents", "readme.txt"}}},
+			radix.Params{{Key: "filepath", Values: []string{"documents", "readme.txt"}}},
 			true,
 		},
 		{
 			[]string{"admin", "dashboard"},
 			"admin_catch_all",
-			Params{{Key: "path", Values: []string{"dashboard"}}},
+			radix.Params{{Key: "path", Values: []string{"dashboard"}}},
 			true,
 		},
 		{
 			[]string{"admin", "users", "settings", "advanced"},
 			"admin_catch_all",
-			Params{{Key: "path", Values: []string{"users", "settings", "advanced"}}},
+			radix.Params{{Key: "path", Values: []string{"users", "settings", "advanced"}}},
 			true,
 		},
 		{
 			[]string{"static", "css", "style.css"},
 			"static_files",
-			Params{{Key: "filename", Values: []string{"css", "style.css"}}},
+			radix.Params{{Key: "filename", Values: []string{"css", "style.css"}}},
 			true,
 		},
 		{
@@ -190,7 +192,7 @@ func TestWildcardRouting(t *testing.T) {
 
 // TestMixedRouting tests combination of static, parameter, and wildcard routes
 func TestMixedRouting(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	// Add mixed routes
 	tree.Add([]string{}, "root")
@@ -206,18 +208,18 @@ func TestMixedRouting(t *testing.T) {
 	tests := []struct {
 		path            []string
 		expectedHandler string
-		expectedParams  Params
+		expectedParams  radix.Params
 		found           bool
 	}{
-		{[]string{}, "root", Params{}, true},
-		{[]string{"api"}, "api_root", Params{}, true},
-		{[]string{"api", "users"}, "api_users", Params{}, true},
-		{[]string{"api", "users", "123"}, "api_user_show", Params{{Key: "id", Values: []string{"123"}}}, true},
-		{[]string{"api", "users", "456", "profile"}, "api_user_profile", Params{{Key: "id", Values: []string{"456"}}}, true},
-		{[]string{"api", "posts", "789", "comments", "101"}, "api_comment", Params{{Key: "post_id", Values: []string{"789"}}, {Key: "comment_id", Values: []string{"101"}}}, true},
-		{[]string{"files", "images", "logo.png"}, "serve_files", Params{{Key: "filepath", Values: []string{"images", "logo.png"}}}, true},
-		{[]string{"admin", "dashboard", "stats"}, "admin_panel", Params{{Key: "path", Values: []string{"dashboard", "stats"}}}, true},
-		{[]string{"files", "~", "", "config.json"}, "static_filename_tilde", Params{{Key: "filename", Values: []string{"config.json"}}}, true},
+		{[]string{}, "root", radix.Params{}, true},
+		{[]string{"api"}, "api_root", radix.Params{}, true},
+		{[]string{"api", "users"}, "api_users", radix.Params{}, true},
+		{[]string{"api", "users", "123"}, "api_user_show", radix.Params{{Key: "id", Values: []string{"123"}}}, true},
+		{[]string{"api", "users", "456", "profile"}, "api_user_profile", radix.Params{{Key: "id", Values: []string{"456"}}}, true},
+		{[]string{"api", "posts", "789", "comments", "101"}, "api_comment", radix.Params{{Key: "post_id", Values: []string{"789"}}, {Key: "comment_id", Values: []string{"101"}}}, true},
+		{[]string{"files", "images", "logo.png"}, "serve_files", radix.Params{{Key: "filepath", Values: []string{"images", "logo.png"}}}, true},
+		{[]string{"admin", "dashboard", "stats"}, "admin_panel", radix.Params{{Key: "path", Values: []string{"dashboard", "stats"}}}, true},
+		{[]string{"files", "~", "", "config.json"}, "static_filename_tilde", radix.Params{{Key: "filename", Values: []string{"config.json"}}}, true},
 		{[]string{"nonexistent"}, "", nil, false},
 		{[]string{"api", "users", "123", "invalid"}, "", nil, false},
 		{[]string{"files"}, "", nil, false},
@@ -235,7 +237,7 @@ func TestMixedRouting(t *testing.T) {
 
 // TestPriorityOrdering tests that routes are matched in the correct priority order
 func TestPriorityOrdering(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	// Add routes in a specific order to test priority
 	tree.Add([]string{"static", "*filepath"}, "static_files")
@@ -246,27 +248,27 @@ func TestPriorityOrdering(t *testing.T) {
 	tests := []struct {
 		path            []string
 		expectedHandler string
-		expectedParams  Params
+		expectedParams  radix.Params
 	}{
 		{
 			[]string{"static", "js", "app.js"},
 			"app_js",
-			Params{},
+			radix.Params{},
 		},
 		{
 			[]string{"static", "css", "style.css"},
 			"static_files",
-			Params{{Key: "filepath", Values: []string{"css", "style.css"}}},
+			radix.Params{{Key: "filepath", Values: []string{"css", "style.css"}}},
 		},
 		{
 			[]string{"api", "v1", "users"},
 			"api_v1_users",
-			Params{},
+			radix.Params{},
 		},
 		{
 			[]string{"api", "v2", "users"},
 			"api_users",
-			Params{{Key: "version", Values: []string{"v2"}}},
+			radix.Params{{Key: "version", Values: []string{"v2"}}},
 		},
 	}
 
@@ -283,7 +285,7 @@ func TestPriorityOrdering(t *testing.T) {
 
 // TestConflictingRoutes tests that conflicting routes are handled correctly
 func TestConflictingRoutes(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 	tree.Add([]string{"users", ":id"}, "handler1")
 	err := tree.Add([]string{"users", ":id"}, "handler2")
 	if err == nil {
@@ -292,7 +294,7 @@ func TestConflictingRoutes(t *testing.T) {
 }
 
 func TestConflictingWildcardRoutes(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 	tree.Add([]string{"files", "*filepath"}, "handler1")
 	err := tree.Add([]string{"files", "*filepath2"}, "handler2")
 	if err == nil {
@@ -301,7 +303,7 @@ func TestConflictingWildcardRoutes(t *testing.T) {
 }
 
 func TestEmptyParameterName(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 	err := tree.Add([]string{"users", ":"}, "handler")
 	if err == nil {
 		t.Errorf("Expected error when adding route with empty parameter name")
@@ -309,7 +311,7 @@ func TestEmptyParameterName(t *testing.T) {
 }
 
 func TestEmptyWildcardName(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 	err := tree.Add([]string{"files", "*"}, "handler")
 	if err != nil {
 		t.Errorf("Did not expect error when adding wildcard with empty name")
@@ -330,7 +332,7 @@ func TestInvalidRoutes(t *testing.T) {
 
 	for _, test := range invalidRoutes {
 		func() {
-			tree := NewRadixTree()
+			tree := radix.NewRadixTree()
 			err := tree.Add(test.path, "handler")
 			if err == nil {
 				t.Errorf("Expected error for %s: %v", test.desc, test.path)
@@ -341,7 +343,7 @@ func TestInvalidRoutes(t *testing.T) {
 
 // TestEmptyTree tests operations on empty tree
 func TestEmptyTree(t *testing.T) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	_, _, found := tree.Get([]string{})
 	assertEqual(t, found, false, "Empty tree should not find root")
@@ -350,9 +352,9 @@ func TestEmptyTree(t *testing.T) {
 	assertEqual(t, found, false, "Empty tree should not find any route")
 }
 
-// TestParamsGet tests the Params.Get method
+// TestParamsGet tests the radix.Params.Get method
 func TestParamsGet(t *testing.T) {
-	params := Params{
+	params := radix.Params{
 		{Key: "id", Values: []string{"123"}},
 		{Key: "name", Values: []string{"john"}},
 		{Key: "category", Values: []string{"tech"}},
@@ -379,7 +381,7 @@ func TestParamsGet(t *testing.T) {
 
 // BenchmarkStaticRoutes benchmarks static route lookup
 func BenchmarkStaticRoutes(b *testing.B) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	routes := [][]string{
 		{},
@@ -407,7 +409,7 @@ func BenchmarkStaticRoutes(b *testing.B) {
 
 // BenchmarkParameterRoutes benchmarks parameter route lookup
 func BenchmarkParameterRoutes(b *testing.B) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	tree.Add([]string{"users", ":id"}, "user_show")
 	tree.Add([]string{"users", ":id", "posts"}, "user_posts")
@@ -421,7 +423,7 @@ func BenchmarkParameterRoutes(b *testing.B) {
 
 // BenchmarkWildcardRoutes benchmarks wildcard route lookup
 func BenchmarkWildcardRoutes(b *testing.B) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	tree.Add([]string{"files", "*filepath"}, "files")
 	tree.Add([]string{"admin", "*path"}, "admin")
@@ -434,7 +436,7 @@ func BenchmarkWildcardRoutes(b *testing.B) {
 
 // BenchmarkMixedRoutes benchmarks mixed route types lookup
 func BenchmarkMixedRoutes(b *testing.B) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 
 	// Add a realistic set of routes
 	routes := []struct {
@@ -492,7 +494,7 @@ func BenchmarkMixedRoutes(b *testing.B) {
 }
 
 func BenchmarkManyRoutes(b *testing.B) {
-	tree := NewRadixTree()
+	tree := radix.NewRadixTree()
 	count := 5000
 	batchLog := 1000
 	stringsList := []string{}
