@@ -274,10 +274,20 @@ func TestPriorityOrdering(t *testing.T) {
 	}
 }
 
-func TestConflictingRoutes(t *testing.T) {
+func TestConflictingRoutes1(t *testing.T) {
 	tree := radix.NewRadixTree()
 	tree.Add([]string{"users", ":id"}, "handler1")
-	err := tree.Add([]string{"users", ":id"}, "handler2")
+	_, err := tree.Add([]string{"users", ":id"}, "handler2")
+	if err == nil {
+		t.Errorf("Expected error when adding conflicting route")
+	}
+}
+
+func TestConflictingRoutes2(t *testing.T) {
+	tree := radix.NewRadixTree()
+	tree.Add([]string{"users", "id"}, "handler1")
+	tree.Add([]string{"users", ":id"}, "handler2")
+	_, err := tree.Add([]string{"users", "id"}, "handler3")
 	if err == nil {
 		t.Errorf("Expected error when adding conflicting route")
 	}
@@ -286,7 +296,7 @@ func TestConflictingRoutes(t *testing.T) {
 func TestConflictingWildcardRoutes(t *testing.T) {
 	tree := radix.NewRadixTree()
 	tree.Add([]string{"files", "*filepath"}, "handler1")
-	err := tree.Add([]string{"files", "*filepath2"}, "handler2")
+	_, err := tree.Add([]string{"files", "*filepath2"}, "handler2")
 	if err != nil {
 		t.Errorf("Did not expect error when adding conflicting wildcard routes")
 	}
@@ -294,18 +304,93 @@ func TestConflictingWildcardRoutes(t *testing.T) {
 
 func TestEmptyParameterName(t *testing.T) {
 	tree := radix.NewRadixTree()
-	err := tree.Add([]string{"users", ":"}, "handler")
-	if err == nil {
-		t.Errorf("Expected error when adding route with empty parameter name")
+	_, err := tree.Add([]string{"users", ":"}, "handler")
+	if err != nil {
+		t.Errorf("Did not Expect error when adding route with empty parameter name")
 	}
 }
 
 func TestEmptyWildcardName(t *testing.T) {
 	tree := radix.NewRadixTree()
-	err := tree.Add([]string{"files", "*"}, "handler")
+	_, err := tree.Add([]string{"files", "*"}, "handler")
 	if err != nil {
 		t.Errorf("Did not expect error when adding wildcard with empty name")
 	}
+}
+
+func TestTreeSize(t *testing.T) {
+	tree := radix.NewRadixTree()
+	if tree.Size() != 0 {
+		t.Errorf("Expected size 0 for empty tree, got %d", tree.Size())
+	}
+
+	tree.Add([]string{"users"}, "handler1")
+	if tree.Size() != 1 {
+		t.Errorf("Expected size 1 after adding one route, got %d", tree.Size())
+	}
+
+	tree.Add([]string{"users", ":id"}, "handler2")
+	if tree.Size() != 2 {
+		t.Errorf("Expected size 2 after adding second route, got %d", tree.Size())
+	}
+}
+
+func TestTreeInsertion1(t *testing.T) {
+	tree := radix.NewRadixTree()
+	nw1, _ := tree.Add([]string{"users", ":id"}, "user_show")
+	nw2, _ := tree.Add([]string{"users", ":id", "posts"}, "user_posts")
+	assert.Equal(t, nw1.PathName(), ":id")
+	assert.Equal(t, nw2.PathName(), "posts")
+	parent1, ok1 := nw1.Parent()
+	parent2, ok2 := nw2.Parent()
+	assert.Equal(t, ok1, true)
+	assert.Equal(t, ok2, true)
+	assert.Equal(t, parent1.PathName(), "users")
+	assert.Equal(t, parent2.PathName(), ":id")
+	assert.Equal(t, parent2, nw1)
+}
+
+func TestTreeInsertion2(t *testing.T) {
+	tree := radix.NewRadixTree()
+	nw1, _ := tree.Add([]string{"files", "*filepath"}, "files")
+	nw2, _ := tree.Add([]string{"files", "~", "", ":filename"}, "static_filename_tilde")
+	assert.Equal(t, "*filepath", nw1.PathName())
+	assert.Equal(t, ":filename", nw2.PathName())
+	parent1, ok1 := nw1.Parent()
+	parent2, ok2 := nw2.Parent()
+	assert.Equal(t, true, ok1)
+	assert.Equal(t, true, ok2)
+	assert.Equal(t, "files", parent1.PathName())
+	assert.Equal(t, "", parent2.PathName())
+}
+
+func TestTreeInsertion3(t *testing.T) {
+	tree := radix.NewRadixTree()
+	tree.Add([]string{"api", "v1", "users"}, "api_v1_users")
+	tree.Add([]string{"api", ":version", "users"}, "api_users")
+	tree.Add([]string{"api", "v2", "users"}, "api_v2_users")
+	nw, _ := tree.Add([]string{"api", "v2", "users", "profile"}, "api_v2_user_profile")
+	assert.Equal(t, nw.PathName(), "profile")
+	treeRoot := tree.Root()
+	counter := 0
+	parent, _ := nw.Parent()
+	ok := false
+	for !parent.Equal(treeRoot) {
+		counter++
+		if counter > 5 {
+			t.Errorf("Exceeded expected tree depth")
+			return
+		}
+		nw = parent
+		parent, ok = nw.Parent()
+		if !ok {
+			t.Errorf("Expected parent node, got none")
+			return
+		}
+	}
+	assert.Equal(t, "api", nw.PathName())
+	assert.Equal(t, uint32(4), tree.Size())
+	assert.Equal(t, uint32(4), nw.Size())
 }
 
 func TestInvalidRoutes(t *testing.T) {
@@ -320,13 +405,11 @@ func TestInvalidRoutes(t *testing.T) {
 	}
 
 	for _, test := range invalidRoutes {
-		func() {
-			tree := radix.NewRadixTree()
-			err := tree.Add(test.path, "handler")
-			if err == nil {
-				t.Errorf("Expected error for %s: %v", test.desc, test.path)
-			}
-		}()
+		tree := radix.NewRadixTree()
+		_, err := tree.Add(test.path, "handler")
+		if err == nil {
+			t.Errorf("Expected error for %s: %v", test.desc, test.path)
+		}
 	}
 }
 
@@ -540,16 +623,12 @@ func BenchmarkMixedRoutes(b *testing.B) {
 func BenchmarkManyRoutes(b *testing.B) {
 	tree := radix.NewRadixTree()
 	count := 5000
-	batchLog := 1000
 	stringsList := []string{}
 
 	for i := range count {
 		randomStr := fmt.Sprintf("%d-%d", rand.Int(), i)
 		tree.Add([]string{"api", "serviceRandom@3", randomStr}, randomStr+"_handler")
 		stringsList = append(stringsList, randomStr)
-		if i%batchLog == 0 && i > 0 {
-			b.Logf("Generated %d/%d items, %%%f", i, count, 100*float32(i)/float32(count))
-		}
 	}
 
 	b.Logf("Generated %d items done.", count)
