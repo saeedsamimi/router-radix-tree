@@ -109,6 +109,10 @@ func (r *RadixTree) Get(path []string) Routes {
 	return r.getValue(r.root, path, nil)
 }
 
+func (r *RadixTree) Delete(path []string) error {
+	return r.deleteRoute(r.root, path)
+}
+
 func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) (*NodeWrapper, error) {
 	if len(segments) == 0 {
 		node.rwMutex.Lock()
@@ -116,6 +120,7 @@ func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) (*N
 		if node.handler != nil {
 			return nil, fmt.Errorf("handler already exists for this path")
 		}
+		node.nodeSize++
 		node.handler = handler
 		return wrap(node), nil
 	}
@@ -203,6 +208,7 @@ func (r *RadixTree) addWildcardChild(node *Node, segment string, remaining []str
 		isWildcard: true,
 		handler:    handler,
 		parent:     node,
+		nodeSize:   1,
 	}
 	node.wildcard_children = append(node.wildcard_children, child)
 	return wrap(child), nil
@@ -279,4 +285,75 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 	}
 
 	return routes
+}
+
+func (r *RadixTree) deleteRoute(node *Node, path []string) error {
+	if len(path) == 0 {
+		if node.handler != nil {
+			node.rwMutex.Lock()
+			defer node.rwMutex.Unlock()
+
+			node.handler = nil
+			node.nodeSize--
+			return nil
+		}
+		return fmt.Errorf("path cannot be empty")
+	}
+	segment := path[0]
+	remaining := path[1:]
+
+	node.rwMutex.Lock()
+	defer node.rwMutex.Unlock()
+
+	var child *Node
+	if strings.HasPrefix(segment, "*") {
+		for _, wc := range node.wildcard_children {
+			if wc.path == segment {
+				child = wc
+				break
+			}
+		}
+	} else if strings.HasPrefix(segment, ":") {
+		if node.params_children != nil {
+			child = node.params_children[segment[1:]]
+		}
+	} else {
+		if node.static_children != nil {
+			child = node.static_children[segment]
+		}
+	}
+
+	if child == nil {
+		return fmt.Errorf("path not found")
+	}
+
+	err := r.deleteRoute(child, remaining)
+	if err != nil {
+		return err
+	}
+
+	if child.nodeSize == 0 {
+		switch child.nodeType {
+		case Static:
+			delete(node.static_children, child.path)
+			if len(node.static_children) == 0 {
+				node.static_children = nil
+			}
+		case ParamNode:
+			delete(node.params_children, child.paramName)
+			if len(node.params_children) == 0 {
+				node.params_children = nil
+			}
+		case Wildcard:
+			for i, wc := range node.wildcard_children {
+				if wc == child {
+					node.wildcard_children = append(node.wildcard_children[:i], node.wildcard_children[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+
+	node.nodeSize--
+	return nil
 }

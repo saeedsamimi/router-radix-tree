@@ -332,19 +332,22 @@ func TestEmptyWildcardName(t *testing.T) {
 
 func TestTreeSize(t *testing.T) {
 	tree := radix.NewRadixTree()
-	if tree.Size() != 0 {
-		t.Errorf("Expected size 0 for empty tree, got %d", tree.Size())
-	}
+	assert.Zero(t, tree.Size())
 
 	tree.Add([]string{"users"}, "handler1")
-	if tree.Size() != 1 {
-		t.Errorf("Expected size 1 after adding one route, got %d", tree.Size())
-	}
+	assert.Equal(t, uint32(1), tree.Size())
 
 	tree.Add([]string{"users", ":id"}, "handler2")
-	if tree.Size() != 2 {
-		t.Errorf("Expected size 2 after adding second route, got %d", tree.Size())
-	}
+	assert.Equal(t, uint32(2), tree.Size())
+
+	tree.Add([]string{}, "root_handler")
+	assert.Equal(t, uint32(3), tree.Size())
+
+	tree.Add([]string{"files", "*filepath"}, "handler3")
+	assert.Equal(t, uint32(4), tree.Size())
+
+	tree.Add([]string{"*files"}, "handler_file")
+	assert.Equal(t, uint32(5), tree.Size())
 }
 
 func TestTreeInsertion1(t *testing.T) {
@@ -486,11 +489,29 @@ func TestMultipleMatchingRoutes(t *testing.T) {
 			t.Errorf("Expected %d routes, got %d for path %v", len(test.expectedHandlers), len(routes), test.path)
 			continue
 		}
-		for i, route := range routes {
-			handler := route.Handler
-			params := route.Params
-			assert.Equal(t, handler, test.expectedHandlers[i], fmt.Sprintf("Route %d handler for path %v", i, test.path))
-			assert.Equal(t, params, test.expectedParams[i], fmt.Sprintf("Route %d params for path %v", i, test.path))
+
+		// Create maps for unordered comparison
+		actualHandlers := make(map[string]bool)
+		actualParams := make(map[string]radix.Params)
+
+		for _, route := range routes {
+			handler := route.Handler.(string)
+			actualHandlers[handler] = true
+			actualParams[handler] = route.Params
+		}
+
+		// Check handlers exist (unordered)
+		for _, expectedHandler := range test.expectedHandlers {
+			if !actualHandlers[expectedHandler] {
+				t.Errorf("Expected handler %s not found for path %v", expectedHandler, test.path)
+			}
+		}
+
+		// Check params match for corresponding handlers
+		for i, expectedHandler := range test.expectedHandlers {
+			if actualParam, exists := actualParams[expectedHandler]; exists {
+				assert.Equal(t, actualParam, test.expectedParams[i], fmt.Sprintf("Params for handler %s in path %v", expectedHandler, test.path))
+			}
 		}
 	}
 }
@@ -520,6 +541,43 @@ func TestParamsGet(t *testing.T) {
 	value, found = params.Get("nonexistent")
 	assert.Equal(t, found, false, "Should not find non-existing parameter")
 	assert.Equal(t, len(value), 0, "Should return nil slice for non-existing parameter")
+}
+
+func TestDeletion(t *testing.T) {
+	tree := radix.NewRadixTree()
+
+	// Add routes
+	tree.Add([]string{"users"}, "handler1")
+	tree.Add([]string{"users", ":id"}, "handler2")
+	tree.Add([]string{"users", ":id", ":policy", "*filename"}, "advanced_handler")
+	tree.Add([]string{"admin"}, "handler3")
+	tree.Add([]string{"files", "*filepath"}, "handler4")
+
+	assert.Equal(t, uint32(5), tree.Size())
+
+	// Delete a route
+	err := tree.Delete([]string{"users", ":id", ":policy", "*filename"})
+	assert.Nil(t, err, "Route should be deleted without error")
+	assert.Equal(t, uint32(4), tree.Size(), "Tree size should decrease")
+
+	routes := tree.Get([]string{"users", "123"})
+	assert.Equal(t, len(routes), 1, "Deleted route should not be found")
+	assert.Equal(t, routes[0].Handler.(string), "handler2", "Non-deleted route should have correct handler")
+
+	routes = tree.Get([]string{"users"})
+	assert.Equal(t, len(routes), 1, "Non-deleted route should be found")
+	assert.Equal(t, routes[0].Handler.(string), "handler1", "Non-deleted route should have correct handler")
+
+	err = tree.Delete([]string{"files", "*filepath"})
+	assert.Nil(t, err, "Route should be deleted without error")
+	assert.Equal(t, uint32(3), tree.Size(), "Tree size should decrease")
+
+	routes = tree.Get([]string{"files", "documents", "file.txt"})
+	assert.Equal(t, len(routes), 0, "Deleted route should not be found")
+
+	routes = tree.Get([]string{"files"})
+	assert.Len(t, routes, 0, "Non-deleted route should be found")
+	assert.Equal(t, tree.Size(), uint32(3), "Tree size should remain the same")
 }
 
 func TestConcurrentAccess(t *testing.T) {
