@@ -9,6 +9,7 @@ import (
 	"time"
 
 	radix "github.com/saeedsamimi/router-radix-tree"
+	"github.com/stretchr/testify/assert"
 )
 
 type wrapperPool struct {
@@ -104,10 +105,12 @@ func TestRaceHeavy(t *testing.T) {
 					}
 				case 3:
 					pool.mu.Lock()
-					nw := pool.recs[r.Intn(len(pool.recs))]
+					randomIndex := r.Intn(len(pool.recs))
+					nw := pool.recs[randomIndex]
 					if err := tree.Delete(nw.Path()); err != nil {
-						// assert.Fail(t, "Delete failed: %v", err)
+						assert.Fail(t, "Delete failed: %v", err)
 					}
+					pool.recs = append(pool.recs[:randomIndex], pool.recs[randomIndex+1:]...)
 					pool.mu.Unlock()
 				}
 			}
