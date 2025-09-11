@@ -3,6 +3,7 @@ package radix_test
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 
 	radix "github.com/saeedsamimi/router-radix-tree"
@@ -523,39 +524,42 @@ func TestParamsGet(t *testing.T) {
 
 func TestConcurrentAccess(t *testing.T) {
 	tree := radix.NewRadixTree()
-	done := make(chan bool, 2)
+	wg := sync.WaitGroup{}
+
+	wg.Add(3)
 
 	// Goroutine for adding routes
 	go func() {
-		for i := 0; i < 100; i++ {
+		defer wg.Done()
+		for i := range 50 {
 			tree.Add([]string{"route", fmt.Sprintf("%d", i)}, fmt.Sprintf("handler%d", i))
 		}
-		done <- true
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := range 50 {
+			tree.Add([]string{"route", ":id", fmt.Sprintf("%d", i+50)}, fmt.Sprintf("handler%d", i+50))
+		}
 	}()
 
 	// Goroutine for getting routes
 	go func() {
-		for i := 0; i < 100; i++ {
-			tree.Get([]string{"route", fmt.Sprintf("%d", i%50)})
+		defer wg.Done()
+		for i := range 100 {
+			tree.Get([]string{"route", fmt.Sprintf("%d", i%50), fmt.Sprintf("handlers%d", i%25)})
 		}
-		done <- true
 	}()
 
-	go func() {
-		for i := 0; i < 100; i++ {
-			tree.Get([]string{"route", ":id", fmt.Sprintf("handlers%d", i%25)})
-		}
-		done <- true
-	}()
+	wg.Wait()
 
-	// Wait for both goroutines
-	<-done
-	<-done
-	<-done
+	assert.Equal(t, uint32(100), tree.Size())
 
-	// Verify that some routes were added
-	routes := tree.Get([]string{"route", "50"})
-	assert.True(t, len(routes) > 0, "Should find the added route")
+	routes1 := tree.Get([]string{"route", "20"})
+	assert.Equal(t, 1, len(routes1))
+
+	routes2 := tree.Get([]string{"route", "30", "60"})
+	assert.Equal(t, 1, len(routes2))
 }
 
 func BenchmarkStaticRoutes(b *testing.B) {

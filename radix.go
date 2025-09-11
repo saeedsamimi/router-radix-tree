@@ -49,8 +49,7 @@ type NodeWrapper struct {
 }
 
 type RadixTree struct {
-	root    *Node
-	rwMutex sync.RWMutex
+	root *Node
 }
 
 func (ps Params) Get(name string) ([]string, bool) {
@@ -97,18 +96,16 @@ func (r *RadixTree) Root() *NodeWrapper {
 }
 
 func (r *RadixTree) Size() uint32 {
+	r.root.rwMutex.RLock()
+	defer r.root.rwMutex.RUnlock()
 	return r.root.nodeSize
 }
 
 func (r *RadixTree) Add(path []string, handler Handler) (*NodeWrapper, error) {
-	r.rwMutex.Lock()
-	defer r.rwMutex.Unlock()
 	return r.addRoute(r.root, path, handler)
 }
 
 func (r *RadixTree) Get(path []string) Routes {
-	r.rwMutex.RLock()
-	defer r.rwMutex.RUnlock()
 	return r.getValue(r.root, path, nil)
 }
 
@@ -224,48 +221,62 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 
 	routes := Routes{}
 
+	// Snapshot child pointers while holding the read lock to avoid
+	// iterating maps/slices that may be mutated by writers.
 	node.rwMutex.RLock()
-	// Try static children first (highest priority)
+	var staticChild *Node
 	if node.static_children != nil {
-		if child, exists := node.static_children[segment]; exists {
-			node.rwMutex.RUnlock()
-			if newRoutes := r.getValue(child, remaining, params); len(newRoutes) > 0 {
-				routes = append(routes, newRoutes...)
-			}
-			node.rwMutex.RLock()
+		staticChild = node.static_children[segment]
+	}
+
+	var paramChildren []*Node
+	if len(node.params_children) > 0 {
+		paramChildren = make([]*Node, 0, len(node.params_children))
+		for _, child := range node.params_children {
+			paramChildren = append(paramChildren, child)
+		}
+	}
+
+	var wildcardChildren []*Node
+	if len(node.wildcard_children) > 0 {
+		wildcardChildren = make([]*Node, len(node.wildcard_children))
+		copy(wildcardChildren, node.wildcard_children)
+	}
+	node.rwMutex.RUnlock()
+
+	// Try static children first (highest priority)
+	if staticChild != nil {
+		if newRoutes := r.getValue(staticChild, remaining, params); len(newRoutes) > 0 {
+			routes = append(routes, newRoutes...)
 		}
 	}
 
 	// Try parameter children (medium priority)
-	paramsRoutes := segments[:1]
-	for _, child := range node.params_children {
-		newParams := append(params, RouteParam{
-			Key:    child.paramName,
-			Values: paramsRoutes,
-		})
-		node.rwMutex.RUnlock()
-		if newRoutes := r.getValue(child, remaining, newParams); len(newRoutes) > 0 {
-			routes = append(routes, newRoutes...)
+	if len(paramChildren) > 0 {
+		paramsRoutes := segments[:1]
+		for _, child := range paramChildren {
+			newParams := append(params, RouteParam{
+				Key:    child.paramName,
+				Values: paramsRoutes,
+			})
+			if newRoutes := r.getValue(child, remaining, newParams); len(newRoutes) > 0 {
+				routes = append(routes, newRoutes...)
+			}
 		}
-		node.rwMutex.RLock()
 	}
 
-	wildcardRoutes := Routes{}
-	if node.wildcard_children != nil {
-		// Try wildcard child (lowest priority)
-		// Wildcard consumes all remaining segments
-		for _, child := range node.wildcard_children {
+	// Try wildcard child (lowest priority)
+	if len(wildcardChildren) > 0 {
+		for _, child := range wildcardChildren {
 			if child.handler != nil {
 				newParams := append(params, RouteParam{
 					Key:    child.paramName,
 					Values: segments,
 				})
-				wildcardRoutes = append(wildcardRoutes, Route{Handler: child.handler, Params: newParams})
+				routes = append(routes, Route{Handler: child.handler, Params: newParams})
 			}
 		}
 	}
-	node.rwMutex.RUnlock()
 
-	routes = append(routes, wildcardRoutes...)
 	return routes
 }

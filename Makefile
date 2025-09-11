@@ -1,9 +1,12 @@
-.PHONY: test coverage benchmark clean coverage-clean go-clean
+.PHONY: test test-race coverage benchmark clean coverage-clean go-clean
 
 COVERAGE_DIR := coverage
 
 test:
 	go test ./...
+
+test-race:
+	go test -race -v -run=^TestRace.*$$ ./...
 
 coverage:
 	mkdir -p $(COVERAGE_DIR)
