@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 )
 
 type NodeType uint8
@@ -52,7 +51,6 @@ type NodeWrapper struct {
 type RadixTree struct {
 	root    *Node
 	rwMutex sync.RWMutex
-	version atomic.Uint64
 }
 
 func (ps Params) Get(name string) ([]string, bool) {
@@ -102,14 +100,9 @@ func (r *RadixTree) Size() uint32 {
 	return r.root.nodeSize
 }
 
-func (r *RadixTree) Version() uint64 {
-	return r.version.Load()
-}
-
 func (r *RadixTree) Add(path []string, handler Handler) (*NodeWrapper, error) {
 	r.rwMutex.Lock()
 	defer r.rwMutex.Unlock()
-	r.version.Add(1)
 	return r.addRoute(r.root, path, handler)
 }
 
@@ -122,12 +115,11 @@ func (r *RadixTree) Get(path []string) Routes {
 func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) (*NodeWrapper, error) {
 	if len(segments) == 0 {
 		node.rwMutex.Lock()
+		defer node.rwMutex.Unlock()
 		if node.handler != nil {
-			node.rwMutex.Unlock()
 			return nil, fmt.Errorf("handler already exists for this path")
 		}
 		node.handler = handler
-		node.rwMutex.Unlock()
 		return wrap(node), nil
 	}
 
@@ -245,10 +237,11 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 	}
 
 	// Try parameter children (medium priority)
+	paramsRoutes := segments[:1]
 	for _, child := range node.params_children {
 		newParams := append(params, RouteParam{
 			Key:    child.paramName,
-			Values: segments[:1],
+			Values: paramsRoutes,
 		})
 		node.rwMutex.RUnlock()
 		if newRoutes := r.getValue(child, remaining, newParams); len(newRoutes) > 0 {
