@@ -11,10 +11,25 @@ import (
 	radix "github.com/saeedsamimi/router-radix-tree"
 )
 
+type wrapperPool struct {
+	mu   sync.Mutex
+	recs []*radix.NodeWrapper
+}
+
+func (p *wrapperPool) add(nw *radix.NodeWrapper) {
+	if nw == nil {
+		return
+	}
+	p.mu.Lock()
+	p.recs = append(p.recs, nw)
+	p.mu.Unlock()
+}
+
 func TestRaceHeavy(t *testing.T) {
 	t.Parallel()
 
 	tree := radix.NewRadixTree()
+	pool := &wrapperPool{}
 
 	// Preload some routes
 	base := [][]string{
@@ -25,8 +40,10 @@ func TestRaceHeavy(t *testing.T) {
 		{"admin", "*path"},
 		{"users", ":id"},
 	}
-	for _, p := range base {
-		_, _ = tree.Add(p, "handler")
+	for _, pth := range base {
+		if nw, _ := tree.Add(pth, "handler"); nw != nil {
+			pool.add(nw)
+		}
 	}
 
 	workers := runtime.GOMAXPROCS(0) * 4
@@ -58,7 +75,7 @@ func TestRaceHeavy(t *testing.T) {
 		}(i)
 	}
 
-	// Writers (adds on random paths)
+	// Writers (adds and deletes on random paths)
 	for i := 0; i < workers/2; i++ {
 		go func(id int) {
 			defer wg.Done()
@@ -70,13 +87,19 @@ func TestRaceHeavy(t *testing.T) {
 				default:
 				}
 				s := fmt.Sprintf("%d", r.Intn(100))
-				switch r.Intn(3) {
+				switch r.Intn(4) {
 				case 0:
-					_, _ = tree.Add([]string{"api", "dyn", s}, "h")
+					if nw, _ := tree.Add([]string{"api", "dyn", s}, "h"); nw != nil {
+						pool.add(nw)
+					}
 				case 1:
-					_, _ = tree.Add([]string{"profile", ":user", s}, "h")
+					if nw, _ := tree.Add([]string{"profile", ":user", s}, "h"); nw != nil {
+						pool.add(nw)
+					}
 				case 2:
-					_, _ = tree.Add([]string{"files", s}, "h")
+					if nw, _ := tree.Add([]string{"files", s}, "h"); nw != nil {
+						pool.add(nw)
+					}
 				}
 			}
 		}(i)
