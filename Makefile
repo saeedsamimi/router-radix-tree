@@ -7,7 +7,7 @@ test:
 
 coverage:
 	mkdir -p $(COVERAGE_DIR)
-	go test -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
+	go test -covermode=count -coverprofile=$(COVERAGE_DIR)/coverage.out ./...
 	go tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
 	@echo "Coverage report generated at $(COVERAGE_DIR)/coverage.html"
 

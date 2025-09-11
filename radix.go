@@ -16,14 +16,14 @@ const (
 
 // Node represents a node in the radix tree
 type Node struct {
-	nodeType        NodeType
-	path            string
-	static_children map[string]*Node
-	params_children []*Node
-	wildcard_child  *Node
-	handler         Handler
-	paramName       string
-	isWildcard      bool
+	nodeType          NodeType
+	path              string
+	static_children   map[string]*Node
+	params_children   []*Node
+	wildcard_children []*Node
+	handler           Handler
+	paramName         string
+	isWildcard        bool
 }
 
 // Handler represents a route handler
@@ -37,6 +37,13 @@ type RouteParam struct {
 
 // Params is a slice of parameters
 type Params []RouteParam
+
+type Route struct {
+	Handler Handler
+	Params  Params
+}
+
+type Routes []Route
 
 // Get returns the value of the first parameter with the given name
 func (ps Params) Get(name string) ([]string, bool) {
@@ -66,7 +73,7 @@ func (r *RadixTree) Add(path []string, handler Handler) error {
 }
 
 // Get searches for a route in the radix tree
-func (r *RadixTree) Get(path []string) (Handler, Params, bool) {
+func (r *RadixTree) Get(path []string) Routes {
 	return r.getValue(r.root, path, nil)
 }
 
@@ -87,16 +94,13 @@ func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) err
 		if len(remaining) > 0 {
 			return fmt.Errorf("wildcard must be the last segment")
 		}
-		if node.wildcard_child != nil {
-			return fmt.Errorf("wildcard child already exists")
-		}
 		child := &Node{
 			nodeType:   Wildcard,
 			path:       segment,
 			paramName:  segment[1:],
 			isWildcard: true,
 		}
-		node.wildcard_child = child
+		node.wildcard_children = append(node.wildcard_children, child)
 		return r.addRoute(child, remaining, handler)
 	}
 
@@ -138,19 +142,24 @@ func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) err
 }
 
 // getValue searches for a route and extracts parameters
-func (r *RadixTree) getValue(node *Node, segments []string, params Params) (Handler, Params, bool) {
+func (r *RadixTree) getValue(node *Node, segments []string, params Params) Routes {
 	if len(segments) == 0 {
-		return node.handler, params, node.handler != nil
+		if node.handler != nil {
+			return Routes{{Handler: node.handler, Params: params}}
+		}
+		return Routes{}
 	}
 
 	segment := segments[0]
 	remaining := segments[1:]
 
+	routes := Routes{}
+
 	// Try static children first (highest priority)
 	if node.static_children != nil {
 		if child, exists := node.static_children[segment]; exists {
-			if handler, newParams, found := r.getValue(child, remaining, params); found {
-				return handler, newParams, true
+			if newRoutes := r.getValue(child, remaining, params); len(newRoutes) > 0 {
+				routes = append(routes, newRoutes...)
 			}
 		}
 	}
@@ -162,21 +171,25 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) (Hand
 			Values: segments[:1],
 		})
 
-		if handler, finalParams, found := r.getValue(child, remaining, newParams); found {
-			return handler, finalParams, true
+		if newRoutes := r.getValue(child, remaining, newParams); len(newRoutes) > 0 {
+			routes = append(routes, newRoutes...)
 		}
 	}
 
-	if node.wildcard_child == nil {
-		return nil, nil, false
+	if node.wildcard_children == nil {
+		return routes
 	}
 
 	// Try wildcard child (lowest priority)
 	// Wildcard consumes all remaining segments
-	newParams := params
-	newParams = append(params, RouteParam{
-		Key:    node.wildcard_child.paramName,
-		Values: segments,
-	})
-	return node.wildcard_child.handler, newParams, node.wildcard_child.handler != nil
+	for _, child := range node.wildcard_children {
+		if child.handler != nil {
+			newParams := append(params, RouteParam{
+				Key:    child.paramName,
+				Values: segments,
+			})
+			routes = append(routes, Route{Handler: child.handler, Params: newParams})
+		}
+	}
+	return routes
 }

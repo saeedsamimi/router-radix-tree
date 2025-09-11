@@ -3,34 +3,12 @@ package radix_test
 import (
 	"fmt"
 	"math/rand"
-	"reflect"
 	"testing"
 
 	radix "github.com/saeedsamimi/router-radix-tree"
+	"github.com/stretchr/testify/assert"
 )
 
-// Test helper functions
-func assertEqual(t *testing.T, actual, expected interface{}, message string) {
-	if actual != expected {
-		t.Errorf("%s: expected %v, got %v", message, expected, actual)
-	}
-}
-
-func assertParamsEqual(t *testing.T, actual, expected radix.Params, message string) {
-	if len(actual) != len(expected) {
-		t.Errorf("%s: expected %d params, got %d", message, len(expected), len(actual))
-		return
-	}
-
-	for i, param := range expected {
-		if i >= len(actual) || actual[i].Key != param.Key || !reflect.DeepEqual(actual[i].Values, param.Values) {
-			t.Errorf("%s: expected param %d to be {%s: %v}, got {%s: %v}",
-				message, i, param.Key, param.Values, actual[i].Key, actual[i].Values)
-		}
-	}
-}
-
-// TestBasicRouting tests basic static route matching
 func TestBasicRouting(t *testing.T) {
 	tree := radix.NewRadixTree()
 
@@ -55,15 +33,16 @@ func TestBasicRouting(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		handler, _, found := tree.Get(test.path)
-		assertEqual(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
+		routes := tree.Get(test.path)
+		found := len(routes) > 0
+		assert.Equal(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
 		if found {
-			assertEqual(t, handler.(string), test.expected, fmt.Sprintf("Route %v handler", test.path))
+			handler := routes[0].Handler
+			assert.Equal(t, handler.(string), test.expected, fmt.Sprintf("Route %v handler", test.path))
 		}
 	}
 }
 
-// TestParameterRouting tests dynamic parameter matching
 func TestParameterRouting(t *testing.T) {
 	tree := radix.NewRadixTree()
 
@@ -118,16 +97,19 @@ func TestParameterRouting(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		handler, params, found := tree.Get(test.path)
-		assertEqual(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
+		routes := tree.Get(test.path)
+		found := len(routes) > 0
+		assert.Equal(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
 		if found {
-			assertEqual(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
-			assertParamsEqual(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
+			route := routes[0]
+			handler := route.Handler
+			params := route.Params
+			assert.Equal(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
+			assert.Equal(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
 		}
 	}
 }
 
-// TestWildcardRouting tests wildcard (*) parameter matching
 func TestWildcardRouting(t *testing.T) {
 	tree := radix.NewRadixTree()
 
@@ -181,16 +163,19 @@ func TestWildcardRouting(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		handler, params, found := tree.Get(test.path)
-		assertEqual(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
+		routes := tree.Get(test.path)
+		found := len(routes) > 0
+		assert.Equal(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
 		if found {
-			assertEqual(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
-			assertParamsEqual(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
+			route := routes[0]
+			handler := route.Handler
+			params := route.Params
+			assert.Equal(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
+			assert.Equal(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
 		}
 	}
 }
 
-// TestMixedRouting tests combination of static, parameter, and wildcard routes
 func TestMixedRouting(t *testing.T) {
 	tree := radix.NewRadixTree()
 
@@ -211,9 +196,9 @@ func TestMixedRouting(t *testing.T) {
 		expectedParams  radix.Params
 		found           bool
 	}{
-		{[]string{}, "root", radix.Params{}, true},
-		{[]string{"api"}, "api_root", radix.Params{}, true},
-		{[]string{"api", "users"}, "api_users", radix.Params{}, true},
+		{[]string{}, "root", nil, true},
+		{[]string{"api"}, "api_root", nil, true},
+		{[]string{"api", "users"}, "api_users", nil, true},
 		{[]string{"api", "users", "123"}, "api_user_show", radix.Params{{Key: "id", Values: []string{"123"}}}, true},
 		{[]string{"api", "users", "456", "profile"}, "api_user_profile", radix.Params{{Key: "id", Values: []string{"456"}}}, true},
 		{[]string{"api", "posts", "789", "comments", "101"}, "api_comment", radix.Params{{Key: "post_id", Values: []string{"789"}}, {Key: "comment_id", Values: []string{"101"}}}, true},
@@ -226,16 +211,19 @@ func TestMixedRouting(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		handler, params, found := tree.Get(test.path)
-		assertEqual(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
+		routes := tree.Get(test.path)
+		found := len(routes) > 0
+		assert.Equal(t, found, test.found, fmt.Sprintf("Route %v found status", test.path))
 		if found {
-			assertEqual(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
-			assertParamsEqual(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
+			route := routes[0]
+			handler := route.Handler
+			params := route.Params
+			assert.Equal(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
+			assert.Equal(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
 		}
 	}
 }
 
-// TestPriorityOrdering tests that routes are matched in the correct priority order
 func TestPriorityOrdering(t *testing.T) {
 	tree := radix.NewRadixTree()
 
@@ -253,7 +241,7 @@ func TestPriorityOrdering(t *testing.T) {
 		{
 			[]string{"static", "js", "app.js"},
 			"app_js",
-			radix.Params{},
+			nil,
 		},
 		{
 			[]string{"static", "css", "style.css"},
@@ -263,7 +251,7 @@ func TestPriorityOrdering(t *testing.T) {
 		{
 			[]string{"api", "v1", "users"},
 			"api_v1_users",
-			radix.Params{},
+			nil,
 		},
 		{
 			[]string{"api", "v2", "users"},
@@ -273,17 +261,19 @@ func TestPriorityOrdering(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		handler, params, found := tree.Get(test.path)
-		if !found {
+		routes := tree.Get(test.path)
+		if len(routes) == 0 {
 			t.Errorf("Route %v should be found", test.path)
 			continue
 		}
-		assertEqual(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
-		assertParamsEqual(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
+		route := routes[0]
+		handler := route.Handler
+		params := route.Params
+		assert.Equal(t, handler.(string), test.expectedHandler, fmt.Sprintf("Route %v handler", test.path))
+		assert.Equal(t, params, test.expectedParams, fmt.Sprintf("Route %v params", test.path))
 	}
 }
 
-// TestConflictingRoutes tests that conflicting routes are handled correctly
 func TestConflictingRoutes(t *testing.T) {
 	tree := radix.NewRadixTree()
 	tree.Add([]string{"users", ":id"}, "handler1")
@@ -297,8 +287,8 @@ func TestConflictingWildcardRoutes(t *testing.T) {
 	tree := radix.NewRadixTree()
 	tree.Add([]string{"files", "*filepath"}, "handler1")
 	err := tree.Add([]string{"files", "*filepath2"}, "handler2")
-	if err == nil {
-		t.Errorf("Expected error when adding conflicting wildcard route")
+	if err != nil {
+		t.Errorf("Did not expect error when adding conflicting wildcard routes")
 	}
 }
 
@@ -318,7 +308,6 @@ func TestEmptyWildcardName(t *testing.T) {
 	}
 }
 
-// TestInvalidRoutes tests invalid route patterns
 func TestInvalidRoutes(t *testing.T) {
 	// Test invalid route patterns that should return errors
 	invalidRoutes := []struct {
@@ -341,15 +330,74 @@ func TestInvalidRoutes(t *testing.T) {
 	}
 }
 
-// TestEmptyTree tests operations on empty tree
 func TestEmptyTree(t *testing.T) {
 	tree := radix.NewRadixTree()
 
-	_, _, found := tree.Get([]string{})
-	assertEqual(t, found, false, "Empty tree should not find root")
+	routes := tree.Get([]string{})
+	found := len(routes) > 0
+	assert.Equal(t, found, false, "Empty tree should not find root")
 
-	_, _, found = tree.Get([]string{"users"})
-	assertEqual(t, found, false, "Empty tree should not find any route")
+	routes = tree.Get([]string{"users"})
+	found = len(routes) > 0
+	assert.Equal(t, found, false, "Empty tree should not find any route")
+}
+
+func TestMultipleMatchingRoutes(t *testing.T) {
+	tree := radix.NewRadixTree()
+
+	// Add routes that can match the same path
+	tree.Add([]string{"api", ":version"}, "api_version")
+	tree.Add([]string{"api", "*path"}, "api_catch_all")
+	tree.Add([]string{"files", ":filename"}, "file_param")
+	tree.Add([]string{"files", "*filepath"}, "file_wildcard")
+	tree.Add([]string{"files", "~", ":apiname", ":filename"}, "filename1")
+	tree.Add([]string{"files", "~", ":apiname", ":address"}, "filename2")
+
+	tests := []struct {
+		path             []string
+		expectedHandlers []string
+		expectedParams   []radix.Params
+	}{
+		{
+			[]string{"api", "v1"},
+			[]string{"api_version", "api_catch_all"},
+			[]radix.Params{
+				{{Key: "version", Values: []string{"v1"}}},
+				{{Key: "path", Values: []string{"v1"}}},
+			},
+		},
+		{
+			[]string{"files", "test.txt"},
+			[]string{"file_param", "file_wildcard"},
+			[]radix.Params{
+				{{Key: "filename", Values: []string{"test.txt"}}},
+				{{Key: "filepath", Values: []string{"test.txt"}}},
+			},
+		},
+		{
+			[]string{"files", "~", "myapi", "data.json"},
+			[]string{"filename1", "filename2", "file_wildcard"},
+			[]radix.Params{
+				{{Key: "apiname", Values: []string{"myapi"}}, {Key: "filename", Values: []string{"data.json"}}},
+				{{Key: "apiname", Values: []string{"myapi"}}, {Key: "address", Values: []string{"data.json"}}},
+				{{Key: "filepath", Values: []string{"~", "myapi", "data.json"}}},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		routes := tree.Get(test.path)
+		if len(routes) != len(test.expectedHandlers) {
+			t.Errorf("Expected %d routes, got %d for path %v", len(test.expectedHandlers), len(routes), test.path)
+			continue
+		}
+		for i, route := range routes {
+			handler := route.Handler.(string)
+			params := route.Params
+			assert.Equal(t, handler, test.expectedHandlers[i], fmt.Sprintf("Route %d handler for path %v", i, test.path))
+			assert.Equal(t, params, test.expectedParams[i], fmt.Sprintf("Route %d params for path %v", i, test.path))
+		}
+	}
 }
 
 // TestParamsGet tests the radix.Params.Get method
@@ -362,24 +410,23 @@ func TestParamsGet(t *testing.T) {
 
 	// Test existing parameters
 	value, found := params.Get("id")
-	assertEqual(t, found, true, "Should find existing parameter")
+	assert.Equal(t, found, true, "Should find existing parameter")
 	if found && len(value) > 0 {
-		assertEqual(t, value[0], "123", "Should return correct value")
+		assert.Equal(t, value[0], "123", "Should return correct value")
 	}
 
 	value, found = params.Get("name")
-	assertEqual(t, found, true, "Should find existing parameter")
+	assert.Equal(t, found, true, "Should find existing parameter")
 	if found && len(value) > 0 {
-		assertEqual(t, value[0], "john", "Should return correct value")
+		assert.Equal(t, value[0], "john", "Should return correct value")
 	}
 
 	// Test non-existing parameter
 	value, found = params.Get("nonexistent")
-	assertEqual(t, found, false, "Should not find non-existing parameter")
-	assertEqual(t, len(value), 0, "Should return nil slice for non-existing parameter")
+	assert.Equal(t, found, false, "Should not find non-existing parameter")
+	assert.Equal(t, len(value), 0, "Should return nil slice for non-existing parameter")
 }
 
-// BenchmarkStaticRoutes benchmarks static route lookup
 func BenchmarkStaticRoutes(b *testing.B) {
 	tree := radix.NewRadixTree()
 
@@ -407,7 +454,6 @@ func BenchmarkStaticRoutes(b *testing.B) {
 	}
 }
 
-// BenchmarkParameterRoutes benchmarks parameter route lookup
 func BenchmarkParameterRoutes(b *testing.B) {
 	tree := radix.NewRadixTree()
 
@@ -421,7 +467,6 @@ func BenchmarkParameterRoutes(b *testing.B) {
 	}
 }
 
-// BenchmarkWildcardRoutes benchmarks wildcard route lookup
 func BenchmarkWildcardRoutes(b *testing.B) {
 	tree := radix.NewRadixTree()
 
@@ -434,7 +479,6 @@ func BenchmarkWildcardRoutes(b *testing.B) {
 	}
 }
 
-// BenchmarkMixedRoutes benchmarks mixed route types lookup
 func BenchmarkMixedRoutes(b *testing.B) {
 	tree := radix.NewRadixTree()
 
@@ -513,7 +557,8 @@ func BenchmarkManyRoutes(b *testing.B) {
 	for b.Loop() {
 		randomIndex := rand.Intn(len(stringsList))
 		path := stringsList[randomIndex]
-		_, _, exists := tree.Get([]string{"api", "serviceRandom@3", path})
+		routes := tree.Get([]string{"api", "serviceRandom@3", path})
+		exists := len(routes) > 0
 		if !exists {
 			b.Errorf("Expected to found %s path in tree, but not found!", path)
 		}
