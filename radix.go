@@ -3,6 +3,7 @@ package radix
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -16,15 +17,16 @@ const (
 
 type Node struct {
 	parent            *Node
-	nodeSize          atomic.Uint32
+	nodeSize          uint32
 	nodeType          NodeType
 	path              string
 	static_children   map[string]*Node
 	params_children   map[string]*Node
-	wildcard_children map[string]*Node
+	wildcard_children []*Node
 	handler           Handler
 	paramName         string
 	isWildcard        bool
+	rwMutex           sync.RWMutex
 }
 
 type Handler interface{}
@@ -48,7 +50,9 @@ type NodeWrapper struct {
 }
 
 type RadixTree struct {
-	root *Node
+	root    *Node
+	rwMutex sync.RWMutex
+	version atomic.Uint64
 }
 
 func (ps Params) Get(name string) ([]string, bool) {
@@ -75,7 +79,7 @@ func (nw *NodeWrapper) Parent() (*NodeWrapper, bool) {
 }
 
 func (nw *NodeWrapper) Size() uint32 {
-	return nw.node.nodeSize.Load()
+	return nw.node.nodeSize
 }
 
 func (nw *NodeWrapper) Equal(w *NodeWrapper) bool {
@@ -95,30 +99,35 @@ func (r *RadixTree) Root() *NodeWrapper {
 }
 
 func (r *RadixTree) Size() uint32 {
-	return r.root.nodeSize.Load()
+	return r.root.nodeSize
+}
+
+func (r *RadixTree) Version() uint64 {
+	return r.version.Load()
 }
 
 func (r *RadixTree) Add(path []string, handler Handler) (*NodeWrapper, error) {
+	r.rwMutex.Lock()
+	defer r.rwMutex.Unlock()
+	r.version.Add(1)
 	return r.addRoute(r.root, path, handler)
 }
 
 func (r *RadixTree) Get(path []string) Routes {
+	r.rwMutex.RLock()
+	defer r.rwMutex.RUnlock()
 	return r.getValue(r.root, path, nil)
-}
-
-func (r *RadixTree) Delete(path []string) error {
-	// Deletion in a radix tree can be complex, especially with parameters and wildcards.
-	// A simple approach is to traverse the tree to find the node and then remove the handler.
-	// However, this does not handle pruning of empty nodes.
-	return fmt.Errorf("delete operation is not implemented")
 }
 
 func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) (*NodeWrapper, error) {
 	if len(segments) == 0 {
+		node.rwMutex.Lock()
 		if node.handler != nil {
+			node.rwMutex.Unlock()
 			return nil, fmt.Errorf("handler already exists for this path")
 		}
 		node.handler = handler
+		node.rwMutex.Unlock()
 		return wrap(node), nil
 	}
 
@@ -135,12 +144,16 @@ func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) (*N
 		nw, err = r.addStaticChild(node, segment, remaining, handler)
 	}
 	if err == nil {
-		node.nodeSize.Add(1)
+		node.rwMutex.Lock()
+		node.nodeSize++
+		node.rwMutex.Unlock()
 	}
 	return nw, err
 }
 
 func (r *RadixTree) addStaticChild(node *Node, segment string, remaining []string, handler Handler) (*NodeWrapper, error) {
+	node.rwMutex.Lock()
+	defer node.rwMutex.Unlock()
 	if child, exists := node.static_children[segment]; exists {
 		return r.addRoute(child, remaining, handler)
 	}
@@ -163,6 +176,8 @@ func (r *RadixTree) addStaticChild(node *Node, segment string, remaining []strin
 }
 
 func (r *RadixTree) addParamChild(node *Node, segment string, remaining []string, handler Handler) (*NodeWrapper, error) {
+	node.rwMutex.Lock()
+	defer node.rwMutex.Unlock()
 	segmentParam := segment[1:]
 
 	if child, exists := node.params_children[segmentParam]; exists {
@@ -182,14 +197,13 @@ func (r *RadixTree) addParamChild(node *Node, segment string, remaining []string
 	if node.params_children == nil {
 		node.params_children = make(map[string]*Node)
 	}
-	if _, exists := node.params_children[child.paramName]; exists {
-		return nil, fmt.Errorf("handler already exists for this path")
-	}
 	node.params_children[child.paramName] = child
 	return nw, nil
 }
 
 func (r *RadixTree) addWildcardChild(node *Node, segment string, remaining []string, handler Handler) (*NodeWrapper, error) {
+	node.rwMutex.Lock()
+	defer node.rwMutex.Unlock()
 	if len(remaining) > 0 {
 		return nil, fmt.Errorf("wildcard must be the last segment")
 	}
@@ -201,13 +215,7 @@ func (r *RadixTree) addWildcardChild(node *Node, segment string, remaining []str
 		handler:    handler,
 		parent:     node,
 	}
-	if node.wildcard_children == nil {
-		node.wildcard_children = make(map[string]*Node)
-	}
-	if _, exists := node.wildcard_children[child.paramName]; exists {
-		return nil, fmt.Errorf("handler already exists for this path")
-	}
-	node.wildcard_children[child.paramName] = child
+	node.wildcard_children = append(node.wildcard_children, child)
 	return wrap(child), nil
 }
 
@@ -224,12 +232,15 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 
 	routes := Routes{}
 
+	node.rwMutex.RLock()
 	// Try static children first (highest priority)
 	if node.static_children != nil {
 		if child, exists := node.static_children[segment]; exists {
+			node.rwMutex.RUnlock()
 			if newRoutes := r.getValue(child, remaining, params); len(newRoutes) > 0 {
 				routes = append(routes, newRoutes...)
 			}
+			node.rwMutex.RLock()
 		}
 	}
 
@@ -239,26 +250,29 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 			Key:    child.paramName,
 			Values: segments[:1],
 		})
-
+		node.rwMutex.RUnlock()
 		if newRoutes := r.getValue(child, remaining, newParams); len(newRoutes) > 0 {
 			routes = append(routes, newRoutes...)
 		}
+		node.rwMutex.RLock()
 	}
 
-	if node.wildcard_children == nil {
-		return routes
-	}
-
-	// Try wildcard child (lowest priority)
-	// Wildcard consumes all remaining segments
-	for _, child := range node.wildcard_children {
-		if child.handler != nil {
-			newParams := append(params, RouteParam{
-				Key:    child.paramName,
-				Values: segments,
-			})
-			routes = append(routes, Route{Handler: child.handler, Params: newParams})
+	wildcardRoutes := Routes{}
+	if node.wildcard_children != nil {
+		// Try wildcard child (lowest priority)
+		// Wildcard consumes all remaining segments
+		for _, child := range node.wildcard_children {
+			if child.handler != nil {
+				newParams := append(params, RouteParam{
+					Key:    child.paramName,
+					Values: segments,
+				})
+				wildcardRoutes = append(wildcardRoutes, Route{Handler: child.handler, Params: newParams})
+			}
 		}
 	}
+	node.rwMutex.RUnlock()
+
+	routes = append(routes, wildcardRoutes...)
 	return routes
 }

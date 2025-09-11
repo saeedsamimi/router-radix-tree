@@ -293,10 +293,21 @@ func TestConflictingRoutes2(t *testing.T) {
 	}
 }
 
+func TestConflictingRoutes3(t *testing.T) {
+	tree := radix.NewRadixTree()
+	tree.Add([]string{":id"}, "handler1")
+	tree.Add([]string{"id"}, "handler2")
+	_, err := tree.Add([]string{":id"}, "handler3")
+	if err == nil {
+		t.Errorf("Expected error when adding conflicting route")
+	}
+}
+
 func TestConflictingWildcardRoutes(t *testing.T) {
 	tree := radix.NewRadixTree()
 	tree.Add([]string{"files", "*filepath"}, "handler1")
-	_, err := tree.Add([]string{"files", "*filepath2"}, "handler2")
+	tree.Add([]string{"files", "*filepath2"}, "handler2")
+	_, err := tree.Add([]string{"files", "*filepath"}, "handler3")
 	if err != nil {
 		t.Errorf("Did not expect error when adding conflicting wildcard routes")
 	}
@@ -399,7 +410,7 @@ func TestInvalidRoutes(t *testing.T) {
 		path []string
 		desc string
 	}{
-		{[]string{":param", "*wildcard", ":param2"}, "parameter after wildcard"},
+		{[]string{"static", ":param", "*wildcard", ":param2"}, "parameter after wildcard"},
 		{[]string{"*wildcard", "static"}, "path segment after wildcard"},
 		{[]string{"*wildcard1", "*wildcard2"}, "wildcard after a wildcard"},
 	}
@@ -475,7 +486,7 @@ func TestMultipleMatchingRoutes(t *testing.T) {
 			continue
 		}
 		for i, route := range routes {
-			handler := route.Handler.(string)
+			handler := route.Handler
 			params := route.Params
 			assert.Equal(t, handler, test.expectedHandlers[i], fmt.Sprintf("Route %d handler for path %v", i, test.path))
 			assert.Equal(t, params, test.expectedParams[i], fmt.Sprintf("Route %d params for path %v", i, test.path))
@@ -508,6 +519,43 @@ func TestParamsGet(t *testing.T) {
 	value, found = params.Get("nonexistent")
 	assert.Equal(t, found, false, "Should not find non-existing parameter")
 	assert.Equal(t, len(value), 0, "Should return nil slice for non-existing parameter")
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	tree := radix.NewRadixTree()
+	done := make(chan bool, 2)
+
+	// Goroutine for adding routes
+	go func() {
+		for i := 0; i < 100; i++ {
+			tree.Add([]string{"route", fmt.Sprintf("%d", i)}, fmt.Sprintf("handler%d", i))
+		}
+		done <- true
+	}()
+
+	// Goroutine for getting routes
+	go func() {
+		for i := 0; i < 100; i++ {
+			tree.Get([]string{"route", fmt.Sprintf("%d", i%50)})
+		}
+		done <- true
+	}()
+
+	go func() {
+		for i := 0; i < 100; i++ {
+			tree.Get([]string{"route", ":id", fmt.Sprintf("handlers%d", i%25)})
+		}
+		done <- true
+	}()
+
+	// Wait for both goroutines
+	<-done
+	<-done
+	<-done
+
+	// Verify that some routes were added
+	routes := tree.Get([]string{"route", "50"})
+	assert.True(t, len(routes) > 0, "Should find the added route")
 }
 
 func BenchmarkStaticRoutes(b *testing.B) {
