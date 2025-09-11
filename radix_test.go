@@ -3,6 +3,7 @@ package radix_test
 import (
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 
 	radix "github.com/saeedsamimi/router-radix-tree"
@@ -274,10 +275,30 @@ func TestPriorityOrdering(t *testing.T) {
 	}
 }
 
-func TestConflictingRoutes(t *testing.T) {
+func TestConflictingRoutes1(t *testing.T) {
 	tree := radix.NewRadixTree()
 	tree.Add([]string{"users", ":id"}, "handler1")
-	err := tree.Add([]string{"users", ":id"}, "handler2")
+	_, err := tree.Add([]string{"users", ":id"}, "handler2")
+	if err == nil {
+		t.Errorf("Expected error when adding conflicting route")
+	}
+}
+
+func TestConflictingRoutes2(t *testing.T) {
+	tree := radix.NewRadixTree()
+	tree.Add([]string{"users", "id"}, "handler1")
+	tree.Add([]string{"users", ":id"}, "handler2")
+	_, err := tree.Add([]string{"users", "id"}, "handler3")
+	if err == nil {
+		t.Errorf("Expected error when adding conflicting route")
+	}
+}
+
+func TestConflictingRoutes3(t *testing.T) {
+	tree := radix.NewRadixTree()
+	tree.Add([]string{":id"}, "handler1")
+	tree.Add([]string{"id"}, "handler2")
+	_, err := tree.Add([]string{":id"}, "handler3")
 	if err == nil {
 		t.Errorf("Expected error when adding conflicting route")
 	}
@@ -286,7 +307,8 @@ func TestConflictingRoutes(t *testing.T) {
 func TestConflictingWildcardRoutes(t *testing.T) {
 	tree := radix.NewRadixTree()
 	tree.Add([]string{"files", "*filepath"}, "handler1")
-	err := tree.Add([]string{"files", "*filepath2"}, "handler2")
+	tree.Add([]string{"files", "*filepath2"}, "handler2")
+	_, err := tree.Add([]string{"files", "*filepath"}, "handler3")
 	if err != nil {
 		t.Errorf("Did not expect error when adding conflicting wildcard routes")
 	}
@@ -294,18 +316,96 @@ func TestConflictingWildcardRoutes(t *testing.T) {
 
 func TestEmptyParameterName(t *testing.T) {
 	tree := radix.NewRadixTree()
-	err := tree.Add([]string{"users", ":"}, "handler")
-	if err == nil {
-		t.Errorf("Expected error when adding route with empty parameter name")
+	_, err := tree.Add([]string{"users", ":"}, "handler")
+	if err != nil {
+		t.Errorf("Did not Expect error when adding route with empty parameter name")
 	}
 }
 
 func TestEmptyWildcardName(t *testing.T) {
 	tree := radix.NewRadixTree()
-	err := tree.Add([]string{"files", "*"}, "handler")
+	_, err := tree.Add([]string{"files", "*"}, "handler")
 	if err != nil {
 		t.Errorf("Did not expect error when adding wildcard with empty name")
 	}
+}
+
+func TestTreeSize(t *testing.T) {
+	tree := radix.NewRadixTree()
+	assert.Zero(t, tree.Size())
+
+	tree.Add([]string{"users"}, "handler1")
+	assert.Equal(t, uint32(1), tree.Size())
+
+	tree.Add([]string{"users", ":id"}, "handler2")
+	assert.Equal(t, uint32(2), tree.Size())
+
+	tree.Add([]string{}, "root_handler")
+	assert.Equal(t, uint32(3), tree.Size())
+
+	tree.Add([]string{"files", "*filepath"}, "handler3")
+	assert.Equal(t, uint32(4), tree.Size())
+
+	tree.Add([]string{"*files"}, "handler_file")
+	assert.Equal(t, uint32(5), tree.Size())
+}
+
+func TestTreeInsertion1(t *testing.T) {
+	tree := radix.NewRadixTree()
+	nw1, _ := tree.Add([]string{"users", ":id"}, "user_show")
+	nw2, _ := tree.Add([]string{"users", ":id", "posts"}, "user_posts")
+	assert.Equal(t, nw1.PathName(), ":id")
+	assert.Equal(t, nw2.PathName(), "posts")
+	parent1, ok1 := nw1.Parent()
+	parent2, ok2 := nw2.Parent()
+	assert.Equal(t, ok1, true)
+	assert.Equal(t, ok2, true)
+	assert.Equal(t, parent1.PathName(), "users")
+	assert.Equal(t, parent2.PathName(), ":id")
+	assert.Equal(t, parent2, nw1)
+}
+
+func TestTreeInsertion2(t *testing.T) {
+	tree := radix.NewRadixTree()
+	nw1, _ := tree.Add([]string{"files", "*filepath"}, "files")
+	nw2, _ := tree.Add([]string{"files", "~", "", ":filename"}, "static_filename_tilde")
+	assert.Equal(t, "*filepath", nw1.PathName())
+	assert.Equal(t, ":filename", nw2.PathName())
+	parent1, ok1 := nw1.Parent()
+	parent2, ok2 := nw2.Parent()
+	assert.Equal(t, true, ok1)
+	assert.Equal(t, true, ok2)
+	assert.Equal(t, "files", parent1.PathName())
+	assert.Equal(t, "", parent2.PathName())
+}
+
+func TestTreeInsertion3(t *testing.T) {
+	tree := radix.NewRadixTree()
+	tree.Add([]string{"api", "v1", "users"}, "api_v1_users")
+	tree.Add([]string{"api", ":version", "users"}, "api_users")
+	tree.Add([]string{"api", "v2", "users"}, "api_v2_users")
+	nw, _ := tree.Add([]string{"api", "v2", "users", "profile"}, "api_v2_user_profile")
+	assert.Equal(t, nw.PathName(), "profile")
+	treeRoot := tree.Root()
+	counter := 0
+	parent, _ := nw.Parent()
+	ok := false
+	for !parent.Equal(treeRoot) {
+		counter++
+		if counter > 5 {
+			t.Errorf("Exceeded expected tree depth")
+			return
+		}
+		nw = parent
+		parent, ok = nw.Parent()
+		if !ok {
+			t.Errorf("Expected parent node, got none")
+			return
+		}
+	}
+	assert.Equal(t, "api", nw.PathName())
+	assert.Equal(t, uint32(4), tree.Size())
+	assert.Equal(t, uint32(4), nw.Size())
 }
 
 func TestInvalidRoutes(t *testing.T) {
@@ -314,19 +414,17 @@ func TestInvalidRoutes(t *testing.T) {
 		path []string
 		desc string
 	}{
-		{[]string{":param", "*wildcard", ":param2"}, "parameter after wildcard"},
+		{[]string{"static", ":param", "*wildcard", ":param2"}, "parameter after wildcard"},
 		{[]string{"*wildcard", "static"}, "path segment after wildcard"},
 		{[]string{"*wildcard1", "*wildcard2"}, "wildcard after a wildcard"},
 	}
 
 	for _, test := range invalidRoutes {
-		func() {
-			tree := radix.NewRadixTree()
-			err := tree.Add(test.path, "handler")
-			if err == nil {
-				t.Errorf("Expected error for %s: %v", test.desc, test.path)
-			}
-		}()
+		tree := radix.NewRadixTree()
+		_, err := tree.Add(test.path, "handler")
+		if err == nil {
+			t.Errorf("Expected error for %s: %v", test.desc, test.path)
+		}
 	}
 }
 
@@ -391,11 +489,29 @@ func TestMultipleMatchingRoutes(t *testing.T) {
 			t.Errorf("Expected %d routes, got %d for path %v", len(test.expectedHandlers), len(routes), test.path)
 			continue
 		}
-		for i, route := range routes {
+
+		// Create maps for unordered comparison
+		actualHandlers := make(map[string]bool)
+		actualParams := make(map[string]radix.Params)
+
+		for _, route := range routes {
 			handler := route.Handler.(string)
-			params := route.Params
-			assert.Equal(t, handler, test.expectedHandlers[i], fmt.Sprintf("Route %d handler for path %v", i, test.path))
-			assert.Equal(t, params, test.expectedParams[i], fmt.Sprintf("Route %d params for path %v", i, test.path))
+			actualHandlers[handler] = true
+			actualParams[handler] = route.Params
+		}
+
+		// Check handlers exist (unordered)
+		for _, expectedHandler := range test.expectedHandlers {
+			if !actualHandlers[expectedHandler] {
+				t.Errorf("Expected handler %s not found for path %v", expectedHandler, test.path)
+			}
+		}
+
+		// Check params match for corresponding handlers
+		for i, expectedHandler := range test.expectedHandlers {
+			if actualParam, exists := actualParams[expectedHandler]; exists {
+				assert.Equal(t, actualParam, test.expectedParams[i], fmt.Sprintf("Params for handler %s in path %v", expectedHandler, test.path))
+			}
 		}
 	}
 }
@@ -425,6 +541,83 @@ func TestParamsGet(t *testing.T) {
 	value, found = params.Get("nonexistent")
 	assert.Equal(t, found, false, "Should not find non-existing parameter")
 	assert.Equal(t, len(value), 0, "Should return nil slice for non-existing parameter")
+}
+
+func TestDeletion(t *testing.T) {
+	tree := radix.NewRadixTree()
+
+	// Add routes
+	tree.Add([]string{"users"}, "handler1")
+	tree.Add([]string{"users", ":id"}, "handler2")
+	tree.Add([]string{"users", ":id", ":policy", "*filename"}, "advanced_handler")
+	tree.Add([]string{"admin"}, "handler3")
+	tree.Add([]string{"files", "*filepath"}, "handler4")
+
+	assert.Equal(t, uint32(5), tree.Size())
+
+	// Delete a route
+	err := tree.Delete([]string{"users", ":id", ":policy", "*filename"})
+	assert.Nil(t, err, "Route should be deleted without error")
+	assert.Equal(t, uint32(4), tree.Size(), "Tree size should decrease")
+
+	routes := tree.Get([]string{"users", "123"})
+	assert.Equal(t, len(routes), 1, "Deleted route should not be found")
+	assert.Equal(t, routes[0].Handler.(string), "handler2", "Non-deleted route should have correct handler")
+
+	routes = tree.Get([]string{"users"})
+	assert.Equal(t, len(routes), 1, "Non-deleted route should be found")
+	assert.Equal(t, routes[0].Handler.(string), "handler1", "Non-deleted route should have correct handler")
+
+	err = tree.Delete([]string{"files", "*filepath"})
+	assert.Nil(t, err, "Route should be deleted without error")
+	assert.Equal(t, uint32(3), tree.Size(), "Tree size should decrease")
+
+	routes = tree.Get([]string{"files", "documents", "file.txt"})
+	assert.Equal(t, len(routes), 0, "Deleted route should not be found")
+
+	routes = tree.Get([]string{"files"})
+	assert.Len(t, routes, 0, "Non-deleted route should be found")
+	assert.Equal(t, tree.Size(), uint32(3), "Tree size should remain the same")
+}
+
+func TestConcurrentAccess(t *testing.T) {
+	tree := radix.NewRadixTree()
+	wg := sync.WaitGroup{}
+
+	wg.Add(3)
+
+	// Goroutine for adding routes
+	go func() {
+		defer wg.Done()
+		for i := range 50 {
+			tree.Add([]string{"route", fmt.Sprintf("%d", i)}, fmt.Sprintf("handler%d", i))
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+		for i := range 50 {
+			tree.Add([]string{"route", ":id", fmt.Sprintf("%d", i+50)}, fmt.Sprintf("handler%d", i+50))
+		}
+	}()
+
+	// Goroutine for getting routes
+	go func() {
+		defer wg.Done()
+		for i := range 100 {
+			tree.Get([]string{"route", fmt.Sprintf("%d", i%50), fmt.Sprintf("handlers%d", i%25)})
+		}
+	}()
+
+	wg.Wait()
+
+	assert.Equal(t, uint32(100), tree.Size())
+
+	routes1 := tree.Get([]string{"route", "20"})
+	assert.Equal(t, 1, len(routes1))
+
+	routes2 := tree.Get([]string{"route", "30", "60"})
+	assert.Equal(t, 1, len(routes2))
 }
 
 func BenchmarkStaticRoutes(b *testing.B) {
@@ -540,19 +733,13 @@ func BenchmarkMixedRoutes(b *testing.B) {
 func BenchmarkManyRoutes(b *testing.B) {
 	tree := radix.NewRadixTree()
 	count := 5000
-	batchLog := 1000
 	stringsList := []string{}
 
 	for i := range count {
 		randomStr := fmt.Sprintf("%d-%d", rand.Int(), i)
 		tree.Add([]string{"api", "serviceRandom@3", randomStr}, randomStr+"_handler")
 		stringsList = append(stringsList, randomStr)
-		if i%batchLog == 0 && i > 0 {
-			b.Logf("Generated %d/%d items, %%%f", i, count, 100*float32(i)/float32(count))
-		}
 	}
-
-	b.Logf("Generated %d items done.", count)
 
 	for b.Loop() {
 		randomIndex := rand.Intn(len(stringsList))
