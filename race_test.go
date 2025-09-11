@@ -17,12 +17,14 @@ type wrapperPool struct {
 }
 
 func (p *wrapperPool) add(nw *radix.NodeWrapper) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if nw == nil {
 		return
 	}
-	p.mu.Lock()
+
 	p.recs = append(p.recs, nw)
-	p.mu.Unlock()
 }
 
 func TestRaceHeavy(t *testing.T) {
@@ -64,7 +66,7 @@ func TestRaceHeavy(t *testing.T) {
 				{"admin", "dashboard"},
 				{"users", fmt.Sprintf("%d", id)},
 			}
-			for j := 0; j < iters; j++ {
+			for range iters {
 				select {
 				case <-stop:
 					return
@@ -100,6 +102,13 @@ func TestRaceHeavy(t *testing.T) {
 					if nw, _ := tree.Add([]string{"files", s}, "h"); nw != nil {
 						pool.add(nw)
 					}
+				case 3:
+					pool.mu.Lock()
+					nw := pool.recs[r.Intn(len(pool.recs))]
+					if err := tree.Delete(nw.Path()); err != nil {
+						// assert.Fail(t, "Delete failed: %v", err)
+					}
+					pool.mu.Unlock()
 				}
 			}
 		}(i)

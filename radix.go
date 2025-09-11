@@ -83,6 +83,18 @@ func (nw *NodeWrapper) Equal(w *NodeWrapper) bool {
 	return nw.node == w.node
 }
 
+func (nw *NodeWrapper) Path() []string {
+	segments := []string{}
+	current := nw.node
+	for current != nil {
+		current.rwMutex.RLock()
+		segments = append([]string{current.path}, segments...)
+		current.rwMutex.RUnlock()
+		current = current.parent
+	}
+	return segments[1:]
+}
+
 func NewRadixTree() *RadixTree {
 	return &RadixTree{
 		root: &Node{
@@ -216,6 +228,8 @@ func (r *RadixTree) addWildcardChild(node *Node, segment string, remaining []str
 
 func (r *RadixTree) getValue(node *Node, segments []string, params Params) Routes {
 	if len(segments) == 0 {
+		node.rwMutex.RLock()
+		defer node.rwMutex.RUnlock()
 		if node.handler != nil {
 			return Routes{{Handler: node.handler, Params: params}}
 		}
@@ -261,6 +275,7 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 	if len(paramChildren) > 0 {
 		paramsRoutes := segments[:1]
 		for _, child := range paramChildren {
+			child.rwMutex.RLock()
 			newParams := append(params, RouteParam{
 				Key:    child.paramName,
 				Values: paramsRoutes,
@@ -268,12 +283,14 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 			if newRoutes := r.getValue(child, remaining, newParams); len(newRoutes) > 0 {
 				routes = append(routes, newRoutes...)
 			}
+			child.rwMutex.RUnlock()
 		}
 	}
 
 	// Try wildcard child (lowest priority)
 	if len(wildcardChildren) > 0 {
 		for _, child := range wildcardChildren {
+			child.rwMutex.RLock()
 			if child.handler != nil {
 				newParams := append(params, RouteParam{
 					Key:    child.paramName,
@@ -281,6 +298,7 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 				})
 				routes = append(routes, Route{Handler: child.handler, Params: newParams})
 			}
+			child.rwMutex.RUnlock()
 		}
 	}
 
