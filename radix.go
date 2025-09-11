@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
-	"unsafe"
 )
 
 type NodeType uint8
@@ -81,10 +80,6 @@ func (nw *NodeWrapper) Size() uint32 {
 
 func (nw *NodeWrapper) Equal(w *NodeWrapper) bool {
 	return nw.node == w.node
-}
-
-func (nw *NodeWrapper) Address() uintptr {
-	return uintptr(unsafe.Pointer(nw.node))
 }
 
 func NewRadixTree() *RadixTree {
