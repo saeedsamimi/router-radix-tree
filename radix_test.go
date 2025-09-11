@@ -631,8 +631,6 @@ func BenchmarkManyRoutes(b *testing.B) {
 		stringsList = append(stringsList, randomStr)
 	}
 
-	b.Logf("Generated %d items done.", count)
-
 	for b.Loop() {
 		randomIndex := rand.Intn(len(stringsList))
 		path := stringsList[randomIndex]

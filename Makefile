@@ -12,7 +12,7 @@ coverage:
 	@echo "Coverage report generated at $(COVERAGE_DIR)/coverage.html"
 
 benchmark:
-	go test -bench=Benchmark*
+	go test -benchmem -run=^$$ -bench=^Benchmark.*$
 
 clean: coverage-clean go-clean
 	rm -rf bin

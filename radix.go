@@ -164,10 +164,9 @@ func (r *RadixTree) addStaticChild(node *Node, segment string, remaining []strin
 
 func (r *RadixTree) addParamChild(node *Node, segment string, remaining []string, handler Handler) (*NodeWrapper, error) {
 	segmentParam := segment[1:]
-	for _, child := range node.params_children {
-		if child.paramName == segmentParam {
-			return r.addRoute(child, remaining, handler)
-		}
+
+	if child, exists := node.params_children[segmentParam]; exists {
+		return r.addRoute(child, remaining, handler)
 	}
 	child := &Node{
 		nodeType:  ParamNode,
