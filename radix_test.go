@@ -3,7 +3,6 @@ package radix_test
 import (
 	"fmt"
 	"math/rand"
-	"sync"
 	"testing"
 
 	radix "github.com/saeedsamimi/router-radix-tree"
@@ -578,46 +577,6 @@ func TestDeletion(t *testing.T) {
 	routes = tree.Get([]string{"files"})
 	assert.Len(t, routes, 0, "Non-deleted route should be found")
 	assert.Equal(t, tree.Size(), uint32(3), "Tree size should remain the same")
-}
-
-func TestConcurrentAccess(t *testing.T) {
-	tree := radix.NewRadixTree()
-	wg := sync.WaitGroup{}
-
-	wg.Add(3)
-
-	// Goroutine for adding routes
-	go func() {
-		defer wg.Done()
-		for i := range 50 {
-			tree.Add([]string{"route", fmt.Sprintf("%d", i)}, fmt.Sprintf("handler%d", i))
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		for i := range 50 {
-			tree.Add([]string{"route", ":id", fmt.Sprintf("%d", i+50)}, fmt.Sprintf("handler%d", i+50))
-		}
-	}()
-
-	// Goroutine for getting routes
-	go func() {
-		defer wg.Done()
-		for i := range 100 {
-			tree.Get([]string{"route", fmt.Sprintf("%d", i%50), fmt.Sprintf("handlers%d", i%25)})
-		}
-	}()
-
-	wg.Wait()
-
-	assert.Equal(t, uint32(100), tree.Size())
-
-	routes1 := tree.Get([]string{"route", "20"})
-	assert.Equal(t, 1, len(routes1))
-
-	routes2 := tree.Get([]string{"route", "30", "60"})
-	assert.Equal(t, 1, len(routes2))
 }
 
 func BenchmarkStaticRoutes(b *testing.B) {

@@ -3,7 +3,6 @@ package radix
 import (
 	"fmt"
 	"strings"
-	"sync"
 )
 
 type NodeType uint8
@@ -25,7 +24,6 @@ type Node struct {
 	handler           Handler
 	paramName         string
 	isWildcard        bool
-	rwMutex           sync.RWMutex
 }
 
 type Handler interface{}
@@ -87,9 +85,7 @@ func (nw *NodeWrapper) Path() []string {
 	segments := []string{}
 	current := nw.node
 	for current != nil {
-		current.rwMutex.RLock()
 		segments = append([]string{current.path}, segments...)
-		current.rwMutex.RUnlock()
 		current = current.parent
 	}
 	return segments[1:]
@@ -108,8 +104,6 @@ func (r *RadixTree) Root() *NodeWrapper {
 }
 
 func (r *RadixTree) Size() uint32 {
-	r.root.rwMutex.RLock()
-	defer r.root.rwMutex.RUnlock()
 	return r.root.nodeSize
 }
 
@@ -127,8 +121,6 @@ func (r *RadixTree) Delete(path []string) error {
 
 func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) (*NodeWrapper, error) {
 	if len(segments) == 0 {
-		node.rwMutex.Lock()
-		defer node.rwMutex.Unlock()
 		if node.handler != nil {
 			return nil, fmt.Errorf("handler already exists for this path")
 		}
@@ -150,16 +142,12 @@ func (r *RadixTree) addRoute(node *Node, segments []string, handler Handler) (*N
 		nw, err = r.addStaticChild(node, segment, remaining, handler)
 	}
 	if err == nil {
-		node.rwMutex.Lock()
 		node.nodeSize++
-		node.rwMutex.Unlock()
 	}
 	return nw, err
 }
 
 func (r *RadixTree) addStaticChild(node *Node, segment string, remaining []string, handler Handler) (*NodeWrapper, error) {
-	node.rwMutex.Lock()
-	defer node.rwMutex.Unlock()
 	if child, exists := node.static_children[segment]; exists {
 		return r.addRoute(child, remaining, handler)
 	}
@@ -182,8 +170,6 @@ func (r *RadixTree) addStaticChild(node *Node, segment string, remaining []strin
 }
 
 func (r *RadixTree) addParamChild(node *Node, segment string, remaining []string, handler Handler) (*NodeWrapper, error) {
-	node.rwMutex.Lock()
-	defer node.rwMutex.Unlock()
 	segmentParam := segment[1:]
 
 	if child, exists := node.params_children[segmentParam]; exists {
@@ -208,8 +194,6 @@ func (r *RadixTree) addParamChild(node *Node, segment string, remaining []string
 }
 
 func (r *RadixTree) addWildcardChild(node *Node, segment string, remaining []string, handler Handler) (*NodeWrapper, error) {
-	node.rwMutex.Lock()
-	defer node.rwMutex.Unlock()
 	if len(remaining) > 0 {
 		return nil, fmt.Errorf("wildcard must be the last segment")
 	}
@@ -228,8 +212,6 @@ func (r *RadixTree) addWildcardChild(node *Node, segment string, remaining []str
 
 func (r *RadixTree) getValue(node *Node, segments []string, params Params) Routes {
 	if len(segments) == 0 {
-		node.rwMutex.RLock()
-		defer node.rwMutex.RUnlock()
 		if node.handler != nil {
 			return Routes{{Handler: node.handler, Params: params}}
 		}
@@ -243,7 +225,6 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 
 	// Snapshot child pointers while holding the read lock to avoid
 	// iterating maps/slices that may be mutated by writers.
-	node.rwMutex.RLock()
 	var staticChild *Node
 	if node.static_children != nil {
 		staticChild = node.static_children[segment]
@@ -262,7 +243,6 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 		wildcardChildren = make([]*Node, len(node.wildcard_children))
 		copy(wildcardChildren, node.wildcard_children)
 	}
-	node.rwMutex.RUnlock()
 
 	// Try static children first (highest priority)
 	if staticChild != nil {
@@ -275,7 +255,6 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 	if len(paramChildren) > 0 {
 		paramsRoutes := segments[:1]
 		for _, child := range paramChildren {
-			child.rwMutex.RLock()
 			newParams := append(params, RouteParam{
 				Key:    child.paramName,
 				Values: paramsRoutes,
@@ -283,14 +262,12 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 			if newRoutes := r.getValue(child, remaining, newParams); len(newRoutes) > 0 {
 				routes = append(routes, newRoutes...)
 			}
-			child.rwMutex.RUnlock()
 		}
 	}
 
 	// Try wildcard child (lowest priority)
 	if len(wildcardChildren) > 0 {
 		for _, child := range wildcardChildren {
-			child.rwMutex.RLock()
 			if child.handler != nil {
 				newParams := append(params, RouteParam{
 					Key:    child.paramName,
@@ -298,7 +275,6 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 				})
 				routes = append(routes, Route{Handler: child.handler, Params: newParams})
 			}
-			child.rwMutex.RUnlock()
 		}
 	}
 
@@ -308,9 +284,6 @@ func (r *RadixTree) getValue(node *Node, segments []string, params Params) Route
 func (r *RadixTree) deleteRoute(node *Node, path []string) error {
 	if len(path) == 0 {
 		if node.handler != nil {
-			node.rwMutex.Lock()
-			defer node.rwMutex.Unlock()
-
 			node.handler = nil
 			node.nodeSize--
 			return nil
@@ -319,9 +292,6 @@ func (r *RadixTree) deleteRoute(node *Node, path []string) error {
 	}
 	segment := path[0]
 	remaining := path[1:]
-
-	node.rwMutex.Lock()
-	defer node.rwMutex.Unlock()
 
 	var child *Node
 	if strings.HasPrefix(segment, "*") {
